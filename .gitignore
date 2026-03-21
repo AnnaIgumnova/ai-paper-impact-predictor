@@ -20,5 +20,8 @@ Thumbs.db
 # VS Code
 .vscode/
 
-# logs
+# Logs
 notebooks/logs.log
+
+# CatBoost
+notebooks/catboost_info/
