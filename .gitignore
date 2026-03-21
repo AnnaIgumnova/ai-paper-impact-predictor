@@ -21,4 +21,4 @@ Thumbs.db
 .vscode/
 
 # logs
-logs.log
+notebooks/logs.log
