@@ -478,3 +478,158 @@ author-institution pairs, not distinct institutions. Confirmed by comparing
 against `unique_institutions_count` computed from raw `authorships` field —
 correlation of only 0.226 between the two columns. See Notebook 1 log for
 full details.
+
+## Notebook 6 — Data Merge, Cleaning and EDA of Enriched Features
+**Input**:
+- `data/OpenAlex/openalex_ai_papers_cleaned.csv`
+- `data/OpenAlex/openalex_ai_papers_enriched.csv`
+**Output**: `data/OpenAlex/openalex_ai_papers_enriched_cleaned.csv` — 293,045 rows, 54 columns
+
+### Steps performed
+
+**1. Merge**
+Left join on `id` — keeps all 293,045 papers from cleaned dataset.
+43 papers from cleaned dataset had no match in enriched pull — filled with 0
+for numerical columns and empty lists for list columns. Decision to fill rather
+than drop because 2 of the 43 are high-impact papers and 43 rows is 0.015%
+of the dataset — statistically negligible.
+
+**2. SDG column handling**
+`sdg_display_names` and `sdg_numbers` were saved as strings in the enriched CSV
+due to pandas CSV serialisation of lists. Converted back to usable formats:
+- `sdg_display_names` — converted using `ast.literal_eval` then joined with `|`
+  separator to avoid confusion with commas inside SDG names
+  (e.g. "Peace, Justice and strong institutions")
+- `sdg_numbers` — converted using `ast.literal_eval` back to actual Python lists
+- `sdg_avg_score` — dropped, redundant given 99% of tagged papers have 0 or 1 SDG
+
+Built SDG number-to-name mapping directly from data before one-hot encoding
+to ensure exact OpenAlex name spelling is preserved.
+
+**3. SDG investigation**
+- All 17 UN SDGs present in the data
+- 148,857 papers have 1 SDG, 902 papers have 2 SDGs, 1 paper has 3 SDGs
+- Quality Education (SDG 4) dominates — ~73k papers, far more than any other SDG
+- Decision to one-hot encode into `sdg_1` through `sdg_17` binary columns —
+  meaningful variation in high impact rate across SDGs (13%–33%) justifies
+  individual columns despite sparsity
+
+**4. Author and institution count investigation**
+- `unique_authors_count` and `authorship_count` correlation = 0.99
+- For small papers both agree exactly
+- For large papers `authorship_count` is more reliable — comes from OpenAlex
+  pre-computed field, not API pagination which caps at 100 entries
+- However manual verification showed `unique_authors_count` is more accurate
+  for papers where OpenAlex indexes bibliography entries as authors
+- Decision: keep both for now, let second model feature importance decide
+- `unique_institutions_count` zeros (25%) investigated — same OpenAlex coverage
+  gap as `countries_distinct_count`, confirmed genuine data gap not fixable
+
+**5. One-hot encode SDG numbers**
+Created `sdg_1` through `sdg_17` binary columns from `sdg_numbers` lists.
+Dropped `sdg_numbers` and `sdg_display_names` after encoding.
+
+### EDA findings
+
+**Univariate analysis**
+- `unique_authors_count` — range 0-100, right-skewed, API cap confirmed at 100
+  for only 30 papers — not a hard cap issue
+- `unique_institutions_count` — range 0-42, right-skewed, 25% zeros
+- `funder_count` — range 0-30, 74% zeros, heavily right-skewed
+- `award_count` — range 0-170+, 81% zeros, very heavily right-skewed
+- `sdg_count` — range 0-3, majority 0 or 1
+- `sdg_max_score` — bimodal, large spike at 0 then spread 0.3-1.0
+
+**Funded vs unfunded papers**
+Funded papers have 31% high impact rate vs 13% for unfunded papers —
+funded papers are 2.4x more likely to be high impact. Strong signal
+for `funder_count` as a predictor.
+
+**SDG analysis**
+- 51.1% of papers have at least one SDG tag
+- Quality Education (SDG 4) most common (~73k papers)
+- High impact rate varies significantly across SDGs (13%–33%)
+- Life below water (SDG 14) highest impact rate (~33%, n=1,295)
+- Climate Action (SDG 13) lowest (~13%, n=4,450)
+- Quality Education despite being most common has only 19% impact rate —
+  same volume dilution effect seen with NLP topic
+
+**Bivariate analysis — new features vs target**
+- `funder_count` and `award_count` — strongest separation between high and
+  not high impact papers
+- `unique_institutions_count` and `institution_edu_count` — clear separation,
+  high impact papers have more distinct institutions
+- `sdg_count` and `sdg_max_score` — weak separation on their own
+
+**Full correlation matrix findings**
+`referenced_works_count` remains strongest predictor (0.39). New enriched
+features add meaningful signal:
+- `unique_institutions_count` (0.24), `funder_count` (0.23), `award_count` (0.22)
+  all correlate similarly to existing `countries_distinct_count` (0.24)
+- SDG features show weak correlation with target (0.04) individually
+
+Key multicollinearity pairs identified:
+- `unique_authors_count` / `authorship_count` — 0.99
+- `sdg_count` / `sdg_max_score` — 0.92
+- `unique_institutions_count` / `institution_edu_count` — 0.88
+- `unique_institutions_count` / `countries_distinct_count` — 0.87
+- `funder_count` / `award_count` — 0.83
+
+Decision: all features kept — tree-based models handle multicollinearity
+well and second model feature importance will guide final drops.
+
+### Known issues
+- `unique_authors_count` capped at 100 for 30 large collaborative papers
+  due to OpenAlex API pagination limit
+- `unique_institutions_count` has 25% zeros — genuine OpenAlex coverage gap,
+  same as original `countries_distinct_count`
+- SDG individual columns are sparse — most papers have 0 or 1 SDG tag
+
+
+## Notebook 7 — Feature Engineering (Enriched)
+**Input**: `data/OpenAlex/openalex_ai_papers_enriched_cleaned.csv`
+**Outputs**:
+- `data/features/X_train_enriched.csv`
+- `data/features/X_test_enriched.csv`
+- `data/features/y_train_enriched.csv`
+- `data/features/y_test_enriched.csv`
+- `models/ohe_enriched.pkl`
+
+### Steps performed
+
+**1. Drop leaky and non-modelling columns**
+Dropped: `id`, `title`, `cited_by_count`, `fwci`, `citation_top_1_percent`,
+`first_year_citations`, `sdg_display_names`, `topic_id`
+
+**2. Language consolidation**
+Same as Notebook 3 — all non-English languages collapsed to `'other'`
+
+**3. Define feature sets**
+- Numerical (31): all original 7 numerical features plus 24 new enriched
+  features including `unique_authors_count`, `unique_institutions_count`,
+  `institution_edu_count`, `funder_count`, `award_count`, `sdg_count`,
+  `sdg_max_score` and `sdg_1` through `sdg_17`
+- Categorical (4): `publication_type`, `oa_status`, `topic_name`, `language`
+  — same as Notebook 3
+
+**4. Train/test split**
+80/20 split, `random_state=42`, `stratify=y` — same seed as Notebook 3
+to ensure comparable evaluation between first and second model
+
+**5. One-hot encode categoricals**
+Refitted `OneHotEncoder` on enriched train set only — same 4 categorical
+columns, same `handle_unknown='ignore'` setting. Saved as `ohe_enriched.pkl`
+to distinguish from original `ohe.pkl`
+
+### Final feature matrix
+- 31 numerical + 23 OHE columns = 54 features total
+- Same 23 OHE columns as Notebook 3 — categorical columns unchanged
+- 24 additional numerical features from enriched pull
+
+### Notes
+- OHE refit on enriched train set — new encoder saved separately from
+  original `ohe.pkl` to avoid overwriting
+- Same `random_state=42` ensures train/test split is directly comparable
+  to first model for fair performance comparison
+- `sdg_1` through `sdg_17` treated as numerical (already binary 0/1) —
+  one-hot encoding would be redundant
