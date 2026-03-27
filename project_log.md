@@ -1,4 +1,6 @@
-# Notebook 1 — Data cleaning
+# AI Paper Impact Predictor — Project Log
+
+## Notebook 1 — Data Cleaning
 **Input**: `data/OpenAlex/openalex_ai_papers_full.csv`
 **Output**: `data/OpenAlex/openalex_ai_papers_cleaned.csv` — ~293,000 rows, 19 columns
 
@@ -61,12 +63,14 @@
 
 **7. Zero value investigation**
 - `countries_distinct_count = 0` — 25% of papers, equal distribution across
-  topics and years, likely OpenAlex coverage gap, kept as zeros for now
+  topics and years, likely OpenAlex coverage gap, kept as zeros
 - `referenced_works_count = 0` — 25% of papers, same pattern, kept as zeros
+- Both confirmed as OpenAlex coverage gaps in Notebook 09 — missingness flags
+  added to distinguish missing data from genuine zeros
 
 ### Known issues retained
 - 25% of papers have `countries_distinct_count = 0` and `referenced_works_count = 0`
-  — OpenAlex coverage gap, to be investigated in second data pull
+  — OpenAlex coverage gap. Addressed in Notebook 09 with missingness flags.
 - `citation_top_10_percent` labels for 2022–2024 may be noisy — papers have not
   had enough time to accumulate citations; label noise expected in this period
 - Version duplicates and same-paper records with different metadata are retained
@@ -92,8 +96,9 @@ accurately reflect what it measures. A true distinct institution count
 (`unique_institutions_count`) was computed in the enriched data pull by collecting
 unique institution IDs across all authors using the `authorships` field directly.
 
+---
 
-# Notebook 2 — EDA
+## Notebook 2 — EDA
 
 **Input**: `data/OpenAlex/openalex_ai_papers_cleaned.csv`
 **Target variable**: `citation_top_10_percent` — binary 0/1, class balance 82/18
@@ -169,8 +174,9 @@ unique institution IDs across all authors using the `authorships` field directly
 - `topic_name` and `publication_year` confirmed as strong features given large
   variation in high impact rates across topics (6%–42%) and years
 
+---
 
-# Notebook 3 — Feature engineering
+## Notebook 3 — Feature Engineering
 
 **Input**: `data/OpenAlex/openalex_ai_papers_cleaned.csv`
 **Outputs**:
@@ -218,130 +224,90 @@ All feature matrices, target vectors and fitted encoder saved to disk
 ### Notes
 - Encoding done after the train/test split to avoid data leakage —
   encoder is fitted on train only, then applied to both sets
-- `ohe.pkl` saved for use in dashboard and future data pulls — when second data
-  pull adds new columns, the encoder will be refit on the enriched dataset
+- `ohe.pkl` saved for use in dashboard and future data pulls
 - Final feature matrix: 7 numerical + 23 one-hot encoded columns = 30 features total
 - `is_oa` kept as numerical (already binary 0/1) — one-hot encoding would be redundant
 
+---
 
-## Notebook 4 — Modelling (first iteration)
+## Notebook 4 — Modelling (First Model)
 **Input**: `data/features/X_train.csv`, `data/features/X_test.csv`,
 `data/features/y_train.csv`, `data/features/y_test.csv`
-**Output**: no model saved — enriched data pull planned before final tuning
+**Output**: `models/gbc_enriched.pkl` — saved after enriched modelling run
 
 ### Setup
 - PyCaret 3.3.2 installed in dedicated `pycaret-env` environment (Python 3.10)
   to resolve NumPy and Python version conflicts with base environment (Python 3.13)
-- Train and test data combined into single DataFrame for PyCaret `setup()`
-- Target column renamed to `target`
+- Train and test data concatenated into single DataFrame for PyCaret `setup()`
+- Target column: `citation_top_10_percent`
 
 ### PyCaret setup() configuration
 - `fix_imbalance=True` — SMOTE applied to training folds only to handle 82/18
   class imbalance. Test set never touched by SMOTE.
 - `session_id=42` — reproducible results
 - `index=False` — resets index to RangeIndex to avoid duplicate index error
-  when combining train and test data
 - `fold=10` — 10-fold StratifiedKFold cross-validation
 - Transformed train set shape: 384,388 rows — expanded from 234k by SMOTE
-- All 30 features recognised as numerical — correct since OHE was applied
-  during feature engineering
+- All 30 features recognised as numerical — correct since OHE applied during FE
 
-### Model comparison — compare_models(sort='F1', n_select=5)
-15 classification models compared using 10-fold stratified cross-validation
-with SMOTE applied to training folds. Ranked by F1 score.
+### Model comparison — compare_models() ranked by F1
+15 classification models compared using 10-fold stratified CV with SMOTE.
 
-| Model | F1 | AUC | Precision | Recall |
+| Model | F1 | AUC | Recall | Precision |
 |---|---|---|---|---|
-| Gradient Boosting (gbc) | 0.54 | 0.84 | 0.50 | 0.60 |
-| AdaBoost (ada) | 0.52 | 0.82 | 0.43 | 0.65 |
-| Ridge / LDA | 0.50 | 0.81 | 0.38 | 0.75 |
-| XGBoost | 0.49 | 0.85 | 0.61 | 0.41 |
-| CatBoost | 0.48 | 0.85 | 0.63 | 0.39 |
+| Gradient Boosting (gbc) | 0.54 | 0.84 | 0.61 | 0.49 |
+| AdaBoost (ada) | 0.52 | 0.82 | 0.65 | 0.43 |
+| Ridge / LDA | 0.50 | 0.81 | 0.75 | 0.38 |
+| XGBoost | 0.49 | 0.85 | 0.41 | 0.61 |
+| CatBoost | 0.48 | 0.85 | 0.39 | 0.63 |
 | Dummy baseline | 0.00 | 0.50 | 0.00 | 0.00 |
 
-XGBoost and CatBoost were not available in the default PyCaret installation —
-installed separately via pip into `pycaret-env`.
+### Model evaluation — GBC (test set)
 
-### Model evaluation — Gradient Boosting Classifier
-Evaluated on holdout test set of 58,609 papers.
+| Metric | Value |
+|---|---|
+| F1 | 0.54 |
+| AUC | 0.84 |
+| Recall | 0.61 |
+| Precision | 0.49 |
+| True Positives | 6,421 |
+| False Negatives | 4,139 |
+| False Positives | 6,776 |
+| True Negatives | 41,273 |
 
-**Confusion matrix:**
-- True positives: 6,421 — correctly identified high-impact papers
-- False negatives: 4,139 — missed high-impact papers
-- False positives: 6,776 — incorrectly flagged as high impact
-- True negatives: 41,273 — correctly identified non-high-impact papers
+### Model evaluation — XGBoost (test set)
 
-The model catches ~60% of high-impact papers, missing 4 in 10.
+| Metric | Value |
+|---|---|
+| F1 | 0.49 |
+| AUC | 0.85 |
+| Recall | 0.41 |
+| Precision | 0.61 |
+| True Positives | 4,282 |
+| False Negatives | 6,278 |
+| False Positives | 2,738 |
+| True Negatives | 45,311 |
 
-**AUC-ROC:** 0.84 — strong class separation. Given a random high-impact and
-a random non-high-impact paper, the model correctly ranks the high-impact one
-higher 84% of the time.
-
-**Precision-Recall:** Average precision = 0.53. Curve starts near 1.0 at low
-recall then drops — model is conservative, only flagging papers as high impact
-when quite confident.
-
-**Classification report:**
-- High impact class: precision 0.487, recall 0.608, F1 0.541
-- Non-high-impact class: precision 0.909, recall 0.859, F1 0.883
-
-### Model evaluation — XGBoost
-Evaluated on same holdout test set for comparison.
-
-**Confusion matrix:**
-- True positives: 4,282 — significantly fewer than GBC
-- False negatives: 6,278 — misses far more high-impact papers than GBC
-- False positives: 2,738 — fewer false alarms than GBC
-- True negatives: 45,311
-
-**Classification report:**
-- High impact class: precision 0.610, recall 0.405, F1 0.487
-- Non-high-impact class: precision 0.878, recall 0.943, F1 0.910
-
-**GBC vs XGBoost comparison:**
-- GBC has higher recall (0.608 vs 0.405) — catches more high-impact papers
-- XGBoost has higher precision (0.610 vs 0.487) — fewer false positives
-- GBC wins on F1 (0.54 vs 0.49) — better overall balance
-- For publisher use case, GBC is preferred — missing fewer high-impact papers
-  matters more than minimising false alarms
+GBC preferred over XGBoost — higher recall (0.61 vs 0.41) more important
+than precision for publisher use case. GBC wins on F1 (0.54 vs 0.49).
 
 ### Feature importance findings — GBC
-Feature importance measured by impurity reduction across all trees.
-
-Top features:
-1. `referenced_works_count` — dominant predictor (0.40 importance)
+1. `referenced_works_count` — dominant predictor (0.40)
 2. `authorship_count` — second strongest (0.12)
 3. `countries_distinct_count` — third (0.09)
 4. `publication_year` — fourth (0.09)
 5. `oa_status_gold` — fifth (0.05)
 
 Notably weak: `keyword_count`, `primary_topic_score`, `is_oa` — near-zero
-importance despite showing meaningful correlation with target in EDA.
-
-Feature importance for XGBoost is distributed more evenly across all features,
-with topic name columns dominating. This reflects a different importance
-calculation method (gain-based vs impurity-based) rather than a better model.
+importance despite meaningful EDA correlation with target.
 
 ### Decision — no tuning, proceed to enriched data pull
-Hyperparameter tuning was deferred. The feature importance analysis revealed
-that the two most important features (`authorship_count` and
-`countries_distinct_count`) have known data quality issues, and new features
-(funder data, SDGs, true institution counts) may change which model wins.
+Hyperparameter tuning deferred. Feature importance revealed that the two most
+important features (`authorship_count`, `countries_distinct_count`) have known
+data quality issues, and new features from the enriched pull may change which
+model wins. Correct sequence: enrich → retrain → tune → SHAP.
 
-**Rationale:** tuning GBC on incomplete features risks wasted effort if a
-different model wins after enrichment. The correct sequence is:
-1. Pull enriched data
-2. Rerun compare_models() with all features
-3. Tune the actual winner
-4. Do SHAP analysis once on the final model
-
-### Known limitations
-- No hyperparameter tuning performed — deferred to post-enrichment modelling
-- SHAP analysis not available as built-in PyCaret plot in version 3.3.2 —
-  will be run manually using the shap library after final model is selected
-- Results may differ slightly on rerun due to SMOTE randomness within
-  cross-validation folds despite session_id=42
-
+---
 
 ## Notebook 5 — Enriched Data Pull
 **Input**: `data/OpenAlex/openalex_ai_papers_cleaned.csv`
@@ -352,75 +318,37 @@ Data pulled March 2026. OpenAlex updates continuously — rerunning will return
 different results. Use saved CSV directly.
 
 ### Motivation
-Feature importance analysis from Notebook 4 identified gaps in the existing
-feature set that warranted a second data pull:
-- `authorship_count` counts author-institution pairs, not true distinct authors
-  or institutions — the 2nd most important feature is based on imprecise data
+Feature importance from Notebook 4 identified gaps:
+- `authorship_count` counts author-institution pairs, not true distinct authors —
+  the 2nd most important feature is based on imprecise data
 - `countries_distinct_count` has 25% zeros — suspected OpenAlex coverage gap
 - No funding data available despite funded research tending to be higher impact
 - No SDG alignment data available
 - No institution type breakdown available
 
-### Pull structure
-Same topic/year structure as original pull (Notebook 00) for efficiency.
-Filtered to only papers present in `openalex_ai_papers_cleaned.csv` after
-each year/topic batch. Pull ran twice — second run after fixing author count
-bug (see Known Issues below).
-
 ### Fields pulled
 ```python
 .select([
     "id",
-    "authorships",                   # unique authors, institution count and type
-    "funders",                        # funder count
-    "awards",                         # individual grant count
-    "sustainable_development_goals",  # SDG alignment
-    "referenced_works",               # raw list for scale estimation
+    "authorships",
+    "funders",
+    "awards",
+    "sustainable_development_goals",
+    "referenced_works",
 ])
 ```
 
 ### Features extracted
-
-**From `authorships`:**
-- `unique_authors_count` — distinct author count using author IDs where available,
-  falling back to authorship entry count for older papers where `author.id = None`
+- `unique_authors_count` — distinct author count using author IDs
 - `unique_institutions_count` — distinct institution IDs across all authors
 - `institution_edu_count` — count of education type institutions
-- `institution_nonprofit_count` — dropped, 98.5% zeros
-- `institution_gov_count` — dropped, 97.8% zeros
-- `institution_company_count` — dropped, 92.2% zeros
-
-**From `funders`:**
 - `funder_count` — number of distinct funding organisations
-
-**From `awards`:**
-- `award_count` — number of individual grants (different from funder_count —
-  same funder can give multiple grants)
-
-**From `sustainable_development_goals`:**
-- `sdg_count` — number of SDGs tagged
-- `sdg_max_score` — highest confidence score among tagged SDGs
-- `sdg_avg_score` — average confidence score across tagged SDGs
-- `sdg_display_names` — list of SDG names for EDA
-- `sdg_numbers` — list of SDG numbers (1-17) for one-hot encoding later
+- `award_count` — number of individual grants
+- `sdg_count`, `sdg_max_score`, `sdg_avg_score` — SDG alignment metrics
+- `sdg_display_names`, `sdg_numbers` — for EDA and OHE
 
 ### Pull results
-| Topic | Papers |
-|---|---|
-| Natural Language Processing Techniques | 53,776 |
-| Neural Networks and Applications | 34,497 |
-| Topic Modeling | 48,744 |
-| Speech Recognition and Synthesis | 21,173 |
-| Sentiment Analysis and Opinion Mining | 26,015 |
-| Anomaly Detection Techniques and Applications | 28,186 |
-| Evolutionary Algorithms and Applications | 7,861 |
-| Metaheuristic Optimization Algorithms Research | 21,356 |
-| Privacy-Preserving Technologies in Data | 27,136 |
-| Quantum Computing Algorithms and Architecture | 24,258 |
-| **Total** | **293,002** |
-
-Match rate: 100.0% — 43 papers missing, negligible, likely removed or updated
-by OpenAlex since original pull.
+293,002 papers pulled. Match rate 100.0% — 43 papers missing, negligible.
 
 ### Zero value investigation
 | Column | Zero % | Decision |
@@ -428,56 +356,31 @@ by OpenAlex since original pull.
 | `institution_nonprofit_count` | 98.5% | Dropped — too sparse |
 | `institution_gov_count` | 97.8% | Dropped — too sparse |
 | `institution_company_count` | 92.2% | Dropped — too sparse |
-| `award_count` | 81.0% | Kept — funded papers may show strong signal |
-| `funder_count` | 73.9% | Kept — same reasoning |
+| `award_count` | 81.0% | Kept — signal confirmed in EDA |
+| `funder_count` | 73.9% | Kept — strong signal confirmed |
 | `sdg_count` | 48.9% | Kept — sufficient coverage |
-| `institution_edu_count` | 30.7% | Kept — 69% of papers have education institutions |
-| `unique_institutions_count` | 25.2% | Kept — genuine OpenAlex coverage gap |
+| `unique_institutions_count` | 25.2% | Kept — genuine coverage gap, flagged in NB09 |
 | `unique_authors_count` | 0.6% | Kept — very complete |
 
-### Countries recalculation investigation
-Attempted to fix the 25% zeros in `countries_distinct_count` by recalculating
-country count directly from institution country codes in `authorships`.
-Result: only 43 papers moved from 0 to non-zero — no meaningful improvement.
-The zeros reflect a genuine OpenAlex coverage gap where institution country data
-is unavailable, not a data extraction issue. `countries_recalculated_count`
-was dropped — adds no value over existing `countries_distinct_count`.
+### Countries recalculation
+Attempted to fix 25% zeros in `countries_distinct_count` by recalculating
+from institution country codes — only 43 papers changed. Confirmed genuine
+OpenAlex coverage gap. `countries_recalculated_count` dropped.
+Coverage gap addressed with `countries_missing` flag in Notebook 09.
 
 ### Features considered and rejected
-- **Funder h-index** — 74% of papers have no funder data, too sparse to add
-  meaningful signal. `funder_count` and `award_count` retained as simpler proxies.
-- **Venue h-index** — `primary_location.source` is None for many proceedings
-  papers, coverage too patchy to be useful.
-- **Referenced works citation quality** — 1.7M unique referenced work IDs across
-  dataset, lookup not feasible within reasonable time. `referenced_works_count`
-  already captures quantity signal as the strongest feature in the first model.
-- **Funder type** — not directly available in the `funders` field, would require
-  separate lookup per funder ID. Skipped given 74% null rate on funder data.
+- Funder h-index — 74% null, too sparse
+- Venue h-index — source field None for many proceedings
+- Referenced works citation quality — 1.7M unique IDs, not feasible
+- Funder type — requires separate lookup per funder ID
 
 ### Known issues
-**Bug in first run — author count underestimated:**
-The first version of `parse_authorships` counted unique author IDs only.
-For older papers where `author.id = None`, this returned 0 even though authors
-existed. After investigation, the function was fixed to fall back to authorship
-entry count when no IDs are available. Pull was rerun after the fix.
-`unique_authors_count` zeros reduced from 5,078 to 1,694 after the fix.
+- Bug fixed in second run: `unique_authors_count` underestimated for older
+  papers where `author.id = None` — fixed to fall back to entry count
+- 1,694 remaining zero authors — genuine OpenAlex data gap
+- 73,703 zero institutions — confirmed genuine coverage gap
 
-**Remaining 1,694 zero authors:**
-Papers where `authorships` field is genuinely empty in OpenAlex — legitimate
-data gap, not a code issue.
-
-**73,703 zero institutions:**
-Papers where authors have no institution data in OpenAlex (`institutions: []`).
-Confirmed by manual inspection — genuine coverage gap, not extractable even
-with different parsing logic.
-
-### OpenAlex data quality finding
-`institutions_distinct_count` (pulled in original notebook, renamed to
-`authorship_count` during cleaning) is misnamed by OpenAlex. It counts
-author-institution pairs, not distinct institutions. Confirmed by comparing
-against `unique_institutions_count` computed from raw `authorships` field —
-correlation of only 0.226 between the two columns. See Notebook 1 log for
-full details.
+---
 
 ## Notebook 6 — Data Merge, Cleaning and EDA of Enriched Features
 **Input**:
@@ -488,103 +391,49 @@ full details.
 ### Steps performed
 
 **1. Merge**
-Left join on `id` — keeps all 293,045 papers from cleaned dataset.
-43 papers from cleaned dataset had no match in enriched pull — filled with 0
-for numerical columns and empty lists for list columns. Decision to fill rather
-than drop because 2 of the 43 are high-impact papers and 43 rows is 0.015%
-of the dataset — statistically negligible.
+Left join on `id` — 43 unmatched papers filled with 0. Kept — 2 are high-impact,
+43 rows is 0.015% of dataset.
 
 **2. SDG column handling**
-`sdg_display_names` and `sdg_numbers` were saved as strings in the enriched CSV
-due to pandas CSV serialisation of lists. Converted back to usable formats:
-- `sdg_display_names` — converted using `ast.literal_eval` then joined with `|`
-  separator to avoid confusion with commas inside SDG names
-  (e.g. "Peace, Justice and strong institutions")
-- `sdg_numbers` — converted using `ast.literal_eval` back to actual Python lists
-- `sdg_avg_score` — dropped, redundant given 99% of tagged papers have 0 or 1 SDG
+- `sdg_display_names` joined with `|` separator
+- `sdg_numbers` converted back to Python lists
+- `sdg_avg_score` dropped — redundant, 99% papers have 0 or 1 SDG
+- One-hot encoded into `sdg_1` through `sdg_17` binary columns
 
-Built SDG number-to-name mapping directly from data before one-hot encoding
-to ensure exact OpenAlex name spelling is preserved.
-
-**3. SDG investigation**
-- All 17 UN SDGs present in the data
-- 148,857 papers have 1 SDG, 902 papers have 2 SDGs, 1 paper has 3 SDGs
-- Quality Education (SDG 4) dominates — ~73k papers, far more than any other SDG
-- Decision to one-hot encode into `sdg_1` through `sdg_17` binary columns —
-  meaningful variation in high impact rate across SDGs (13%–33%) justifies
-  individual columns despite sparsity
-
-**4. Author and institution count investigation**
+**3. Author and institution count investigation**
 - `unique_authors_count` and `authorship_count` correlation = 0.99
-- For small papers both agree exactly
-- For large papers `authorship_count` is more reliable — comes from OpenAlex
-  pre-computed field, not API pagination which caps at 100 entries
-- However manual verification showed `unique_authors_count` is more accurate
-  for papers where OpenAlex indexes bibliography entries as authors
-- Decision: keep both for now, let second model feature importance decide
-- `unique_institutions_count` zeros (25%) investigated — same OpenAlex coverage
-  gap as `countries_distinct_count`, confirmed genuine data gap not fixable
-
-**5. One-hot encode SDG numbers**
-Created `sdg_1` through `sdg_17` binary columns from `sdg_numbers` lists.
-Dropped `sdg_numbers` and `sdg_display_names` after encoding.
+- Decision at this stage: keep both, let model feature importance decide
+- Final decision made in Notebook 09: `authorship_count` dropped,
+  `unique_authors_count` retained — confirmed more accurate and higher
+  model importance when both present
 
 ### EDA findings
 
-**Univariate analysis**
-- `unique_authors_count` — range 0-100, right-skewed, API cap confirmed at 100
-  for only 30 papers — not a hard cap issue
-- `unique_institutions_count` — range 0-42, right-skewed, 25% zeros
-- `funder_count` — range 0-30, 74% zeros, heavily right-skewed
-- `award_count` — range 0-170+, 81% zeros, very heavily right-skewed
-- `sdg_count` — range 0-3, majority 0 or 1
-- `sdg_max_score` — bimodal, large spike at 0 then spread 0.3-1.0
-
 **Funded vs unfunded papers**
-Funded papers have 31% high impact rate vs 13% for unfunded papers —
-funded papers are 2.4x more likely to be high impact. Strong signal
-for `funder_count` as a predictor.
+Funded papers 31% high impact vs 13% unfunded — 2.4x more likely high impact.
+Strong signal for `funder_count`.
 
 **SDG analysis**
-- 51.1% of papers have at least one SDG tag
 - Quality Education (SDG 4) most common (~73k papers)
-- High impact rate varies significantly across SDGs (13%–33%)
+- High impact rate varies 13%–33% across SDGs
 - Life below water (SDG 14) highest impact rate (~33%, n=1,295)
-- Climate Action (SDG 13) lowest (~13%, n=4,450)
-- Quality Education despite being most common has only 19% impact rate —
-  same volume dilution effect seen with NLP topic
 
-**Bivariate analysis — new features vs target**
-- `funder_count` and `award_count` — strongest separation between high and
-  not high impact papers
-- `unique_institutions_count` and `institution_edu_count` — clear separation,
-  high impact papers have more distinct institutions
-- `sdg_count` and `sdg_max_score` — weak separation on their own
+**Full correlation matrix**
+`referenced_works_count` remains strongest (ρ=0.39). New signals:
+- `unique_institutions_count` (0.24), `funder_count` (0.23) — meaningful
+- SDG features weak individually (ρ=0.04)
 
-**Full correlation matrix findings**
-`referenced_works_count` remains strongest predictor (0.39). New enriched
-features add meaningful signal:
-- `unique_institutions_count` (0.24), `funder_count` (0.23), `award_count` (0.22)
-  all correlate similarly to existing `countries_distinct_count` (0.24)
-- SDG features show weak correlation with target (0.04) individually
-
-Key multicollinearity pairs identified:
+Key multicollinearity pairs:
 - `unique_authors_count` / `authorship_count` — 0.99
 - `sdg_count` / `sdg_max_score` — 0.92
 - `unique_institutions_count` / `institution_edu_count` — 0.88
 - `unique_institutions_count` / `countries_distinct_count` — 0.87
 - `funder_count` / `award_count` — 0.83
 
-Decision: all features kept — tree-based models handle multicollinearity
-well and second model feature importance will guide final drops.
+Decision: all kept — tree models handle multicollinearity, feature importance
+in Notebook 08 will guide final drops.
 
-### Known issues
-- `unique_authors_count` capped at 100 for 30 large collaborative papers
-  due to OpenAlex API pagination limit
-- `unique_institutions_count` has 25% zeros — genuine OpenAlex coverage gap,
-  same as original `countries_distinct_count`
-- SDG individual columns are sparse — most papers have 0 or 1 SDG tag
-
+---
 
 ## Notebook 7 — Feature Engineering (Enriched)
 **Input**: `data/OpenAlex/openalex_ai_papers_enriched_cleaned.csv`
@@ -596,40 +445,210 @@ well and second model feature importance will guide final drops.
 - `models/ohe_enriched.pkl`
 
 ### Steps performed
-
-**1. Drop leaky and non-modelling columns**
-Dropped: `id`, `title`, `cited_by_count`, `fwci`, `citation_top_1_percent`,
-`first_year_citations`, `sdg_display_names`, `topic_id`
-
-**2. Language consolidation**
-Same as Notebook 3 — all non-English languages collapsed to `'other'`
-
-**3. Define feature sets**
-- Numerical (31): all original 7 numerical features plus 24 new enriched
-  features including `unique_authors_count`, `unique_institutions_count`,
-  `institution_edu_count`, `funder_count`, `award_count`, `sdg_count`,
-  `sdg_max_score` and `sdg_1` through `sdg_17`
-- Categorical (4): `publication_type`, `oa_status`, `topic_name`, `language`
-  — same as Notebook 3
-
-**4. Train/test split**
-80/20 split, `random_state=42`, `stratify=y` — same seed as Notebook 3
-to ensure comparable evaluation between first and second model
-
-**5. One-hot encode categoricals**
-Refitted `OneHotEncoder` on enriched train set only — same 4 categorical
-columns, same `handle_unknown='ignore'` setting. Saved as `ohe_enriched.pkl`
-to distinguish from original `ohe.pkl`
+Same structure as Notebook 3. Additional drops: `sdg_display_names`, `topic_id`.
+Same 80/20 split, `random_state=42`, `stratify=y`.
+OHE refit on enriched train set — saved as `ohe_enriched.pkl`.
 
 ### Final feature matrix
-- 31 numerical + 23 OHE columns = 54 features total
-- Same 23 OHE columns as Notebook 3 — categorical columns unchanged
-- 24 additional numerical features from enriched pull
+31 numerical + 23 OHE = 54 features total.
 
-### Notes
-- OHE refit on enriched train set — new encoder saved separately from
-  original `ohe.pkl` to avoid overwriting
-- Same `random_state=42` ensures train/test split is directly comparable
-  to first model for fair performance comparison
-- `sdg_1` through `sdg_17` treated as numerical (already binary 0/1) —
-  one-hot encoding would be redundant
+---
+
+## Notebook 8 — Modelling (Enriched)
+**Input**: `data/features/X_train_enriched.csv`, `data/features/X_test_enriched.csv`,
+`data/features/y_train_enriched.csv`, `data/features/y_test_enriched.csv`
+**Output**: `models/gbc_enriched.pkl`, `models/xgb_enriched.pkl`
+
+### PyCaret setup() configuration
+Same as Notebook 4 — SMOTE, 10-fold StratifiedKFold, session_id=42.
+54 features, 293,045 rows.
+
+### Model comparison — compare_models() ranked by F1
+
+| Model | F1 | AUC | Recall | Precision |
+|---|---|---|---|---|
+| GBC | 0.53 | 0.84 | 0.52 | 0.53 |
+| AdaBoost | 0.51 | 0.82 | 0.59 | 0.45 |
+| XGBoost | 0.48 | 0.85 | 0.39 | 0.63 |
+| CatBoost | 0.48 | 0.86 | 0.38 | 0.84 |
+
+### Model evaluation — GBC (test set)
+
+| Metric | First Model | Enriched |
+|---|---|---|
+| F1 | 0.54 | 0.53 |
+| AUC | 0.84 | 0.84 |
+| Recall | 0.61 | 0.53 |
+| Precision | 0.49 | 0.53 |
+| True Positives | 6,421 | 5,563 |
+| False Negatives | 4,139 | 4,997 |
+
+Recall dropped from 0.61 → 0.53 — enriched features added noise.
+AUC unchanged — discriminative power intact.
+
+### Model evaluation — XGBoost (test set)
+
+| Metric | Value |
+|---|---|
+| Recall | 0.39 |
+| Precision | 0.63 |
+| F1 | 0.48 |
+| AUC | 0.85 |
+| PR AUC | 0.58 |
+
+XGBoost feature importance distorted — `sdg_count` dominant despite ρ=0.04.
+`referenced_works_count` only 9th despite being strongest predictor.
+
+### Feature importance — GBC (enriched)
+1. `referenced_works_count` — 0.38 (dominant, consistent with first model)
+2. `unique_authors_count` — 0.06 (replaces `authorship_count` as author signal)
+3. `publication_year` — 0.07
+4. `funder_count` — 0.03 (new signal confirmed)
+5. `sdg_count` — 0.03 (new signal confirmed, weak)
+
+Near-zero: `authorship_count`, `institution_edu_count`, `award_count`,
+`sdg_max_score`, all individual `sdg_1`–`sdg_17` flags
+
+### Decision
+Recall drop caused by noise in 54-feature set. Feature trimming required before
+tuning. XGBoost ruled out — precision-heavy and feature importance unreliable.
+
+---
+
+## Notebook 9 — Feature Trimming
+**Input**: `data/features/X_train_enriched.csv`, `data/features/X_test_enriched.csv`
+**Outputs**:
+- `data/features/X_train_trimmed.csv`
+- `data/features/X_test_trimmed.csv`
+- `data/features/y_train_trimmed.csv`
+- `data/features/y_test_trimmed.csv`
+
+### Features dropped
+
+**Correlated pairs — weaker feature dropped:**
+| Dropped | Kept | Correlation | Reason |
+|---|---|---|---|
+| `authorship_count` | `unique_authors_count` | 0.99 | Misnamed — counts entries not distinct authors. Lower model importance |
+| `institution_edu_count` | `unique_institutions_count` | 0.88 | Subset of broader feature, near-zero importance |
+| `award_count` | `funder_count` | 0.83 | 81% zeros, near-zero importance |
+| `sdg_max_score` | `sdg_count` | 0.92 | Redundant — 99% papers have 0 or 1 SDG |
+
+**Near-zero importance across GBC and XGBoost:**
+`sdg_1`–`sdg_17` (excl. `sdg_4`), `primary_topic_score`, `keyword_count`, `is_oa`
+
+**`sdg_4` retained** — largest SDG tag (n=72k), meaningful GBC importance.
+
+### Missingness flags added
+25% of papers have zeros in three key features confirmed as OpenAlex coverage
+gaps via manual inspection — not genuine zeros.
+
+| Flag | Coverage | Cramér's V |
+|---|---|---|
+| `references_missing` | 24.9% | 0.222 |
+| `countries_missing` | 25.4% | 0.190 |
+| `institutions_missing` | 25.1% | 0.190 |
+
+Flags have stronger statistical association with target than most OHE features.
+
+### Statistical tests
+
+**Chi-squared and Cramér's V — binary features vs target:**
+- Missingness flags confirmed as strongest binary predictors (V=0.19–0.22)
+- `publication_type_journal-article` (V=0.156) and `oa_status_gold` (V=0.132)
+  next strongest
+- `oa_status_green` (V=0.000, p=0.87) and `topic_name_Anomaly Detection`
+  (V=0.001, p=0.73) show no significant association — retained for project
+  scope consistency
+
+**Mann-Whitney U — continuous features vs target:**
+| Feature | Effect Size (r) |
+|---|---|
+| `referenced_works_count` | 0.573 (large) |
+| `unique_institutions_count` | 0.351 (medium) |
+| `countries_distinct_count` | 0.322 (medium) |
+| `unique_authors_count` | 0.296 (medium) |
+| `funder_count` | 0.263 (medium) |
+| `publication_year` | 0.062 (small) |
+| `sdg_count` | 0.050 (small) |
+
+`referenced_works_count` confirmed dominant by three independent methods:
+EDA (ρ=0.39), GBC importance (0.40), Mann-Whitney effect size (0.573).
+`sdg_count` weak by all three methods — XGBoost/AdaBoost distortion confirmed.
+
+### Final feature set: 54 → 34 features
+7 numerical + 3 binary flags + 1 SDG flag + 23 OHE = 34 features
+
+---
+
+## Notebook 10 — Modelling (Trimmed) — IN PROGRESS
+**Input**: `data/features/X_train_trimmed.csv`, `data/features/X_test_trimmed.csv`,
+`data/features/y_train_trimmed.csv`, `data/features/y_test_trimmed.csv`
+**Output**: `models/gbc_trimmed.pkl` (pre-tuning), `models/gbc_tuned.pkl` (in progress)
+
+### PyCaret setup() configuration
+Same as Notebooks 4 and 8 — SMOTE, 10-fold StratifiedKFold, session_id=42.
+34 features, 293,045 rows.
+
+### Model comparison — compare_models() ranked by F1
+
+| Model | F1 | AUC | Recall | Precision |
+|---|---|---|---|---|
+| GBC | 0.54 | 0.84 | 0.60 | 0.50 |
+| AdaBoost | 0.52 | 0.82 | 0.65 | 0.43 |
+| XGBoost | 0.49 | 0.85 | 0.40 | 0.61 |
+| CatBoost | 0.48 | 0.85 | 0.39 | 0.63 |
+
+### Results across all runs — GBC
+
+| Metric | First Model | Enriched | Trimmed + Flags |
+|---|---|---|---|
+| F1 | 0.54 | 0.53 | 0.54 |
+| AUC | 0.84 | 0.84 | 0.84 |
+| Recall | 0.61 | 0.53 | 0.60 |
+| Precision | 0.49 | 0.53 | 0.50 |
+| True Positives | 6,421 | 5,563 | 6,305 |
+| False Negatives | 4,139 | 4,997 | 4,255 |
+
+Trimming recovered recall from 0.53 → 0.60. AUC stable at 0.84 throughout.
+
+### Model selection — GBC confirmed
+Four models evaluated in depth. GBC selected based on:
+
+**1. Performance** — best F1 and precision/recall balance across all runs
+
+**2. Feature importance consistency** — only model consistent with statistical
+evidence. `referenced_works_count` dominant (0.40) matching EDA and
+Mann-Whitney. XGBoost, AdaBoost, CatBoost all distort `sdg_count` importance
+despite near-zero statistical association (V=0.03, r=0.050).
+
+**3. Business case** — AdaBoost higher recall (0.65) but 9,319 false positives
+vs GBC's 6,396 — too noisy. CatBoost precision-heavy (recall 0.38) — misses
+too many high-impact papers.
+
+### Tuning — IN PROGRESS
+```python
+tune_model(
+    gbc_trimmed,
+    optimize         = 'F1',
+    n_iter           = 50,
+    search_library   = 'scikit-optimize',
+    search_algorithm = 'bayesian',
+    early_stopping   = True,
+    choose_better    = True
+)
+```
+
+### Next Steps
+1. Evaluate tuned GBC — plots + confusion matrix
+2. Threshold analysis — find optimal operating point for Streamlit default
+3. Final comparison table across all models and runs
+4. Save final model
+5. SHAP analysis (Notebook 11)
+6. Streamlit dashboard (Week 2)
+7. Presentation (Week 2)
+
+### Future Work
+- Venue quality features (CORE ranking, Scimago journal quartile)
+- Abstract text features
+- Author reputation features (h-index at time of publication)
+- Referenced works citation quality (blocked by 1.7M unique ID scale)
