@@ -625,7 +625,7 @@ despite near-zero statistical association (V=0.03, r=0.050).
 vs GBC's 6,396 — too noisy. CatBoost precision-heavy (recall 0.38) — misses
 too many high-impact papers.
 
-### Tuning — IN PROGRESS
+### Tuning — COMPLETE
 ```python
 tune_model(
     gbc_trimmed,
@@ -638,16 +638,107 @@ tune_model(
 )
 ```
 
-### Next Steps
-1. Evaluate tuned GBC — plots + confusion matrix
-2. Threshold analysis — find optimal operating point for Streamlit default
-3. Final comparison table across all models and runs
-4. Save final model
-5. SHAP analysis (Notebook 11)
-6. Streamlit dashboard (Week 2)
-7. Presentation (Week 2)
+Bayesian search completed 50 iterations — approximately 5 hours runtime.
+Best hyperparameters saved to `models/gbc_tuned.pkl`.
 
-### Future Work
+### Tuning Results — CV
+
+| Metric | Pre-Tuning | Tuned |
+|---|---|---|
+| F1 | 0.5405 | 0.5523 |
+| AUC | 0.8406 | 0.8462 |
+| Recall | 0.5859 | 0.6084 |
+| Precision | 0.5016 | 0.4867 |
+
+### Test Set Evaluation — Final Model Comparison
+
+| Metric | First Model | Enriched | Trimmed+Flags | Tuned GBC |
+|---|---|---|---|---|
+| F1 | 0.5428 | 0.5257 | 0.5405 | 0.5519 |
+| AUC | 0.8413 | 0.8412 | 0.8406 | 0.8446 |
+| Recall | 0.5961 | 0.5195 | 0.5859 | 0.6442 |
+| Precision | 0.4982 | 0.5323 | 0.5016 | 0.4827 |
+| True Positives | 6,421 | 5,563 | 6,305 | 6,803 |
+| False Negatives | 4,139 | 4,997 | 4,255 | 3,757 |
+
+Tuned GBC is the best model across all runs — highest F1, AUC, recall and
+true positives. Catches 382 more high-impact papers than the first model.
+
+### Feature Importance — Notable Changes After Tuning
+- `referenced_works_count` remains dominant (0.30)
+- `references_missing` jumped to 4th — missingness flag more important
+  than pre-tuning results suggested
+- `funder_count` strengthened to 3rd
+- `publication_year` rose to 2nd — citation maturity signal amplified
+
+---
+
+## Notebook 11 — Threshold Analysis and SHAP
+**Input**: `data/features/X_test_trimmed.csv`, `data/features/y_test_trimmed.csv`,
+`data/features/X_train_trimmed.csv`, `data/features/y_train_trimmed.csv`,
+`models/gbc_tuned.pkl`
+**Environment**: pycaret-env (Python 3.10)
+
+### Threshold Analysis
+Tested thresholds from 0.10 to 0.90 in steps of 0.01.
+Default threshold of 0.50 selected — optimal F1 threshold (0.49) showed
+negligible improvement (F1 0.5519 vs 0.5518) at cost of 729 additional
+false positives for only 278 more true positives.
+Streamlit dashboard displays raw probability scores rather than binary
+flag — users apply their own judgement.
+
+### Train vs Test Generalisation
+
+| Metric | Train | Test | Gap |
+|---|---|---|---|
+| F1 | 0.5703 | 0.5519 | 0.018 |
+| Recall | 0.6665 | 0.6442 | 0.022 |
+| Precision | 0.4984 | 0.4827 | 0.016 |
+| AUC | 0.8587 | 0.8446 | 0.014 |
+
+Small train/test gap confirms good generalisation — model learned genuine
+patterns rather than memorising training data.
+
+### Performance by Publication Year
+
+| Year | F1 | Recall |
+|---|---|---|
+| 2015–2016 | 0.62–0.64 | 0.75–0.76 |
+| 2017–2021 | 0.54–0.56 | 0.58–0.65 |
+| 2022–2023 | 0.53 | 0.60–0.63 |
+| 2024 | 0.49 | 0.59 |
+
+Performance degrades gradually for recent papers due to citation maturity
+bias in the target variable. Model remains useful for 2024 papers —
+catching 59% of high-impact papers at publication time.
+
+### SHAP Analysis
+TreeExplainer on 5,000 test set sample (random_state=42).
+Four plots: bar importance, beeswarm, waterfall, dependence plot.
+
+Key findings:
+- `referenced_works_count` dominant (mean |SHAP| 0.27) — confirmed by
+  EDA, statistical tests, GBC importance and SHAP independently
+- `publication_year` second (0.11) — citation maturity bias confirmed
+- `references_missing` third (0.07) — missingness flag outperforms most
+  engineered features
+- Survey/review papers with 500+ references correctly flagged as high impact
+- NLP papers penalised — consistent with lowest impact rate in EDA (10.2%)
+- Funded papers and gold OA papers consistently pushed toward high impact
+
+### Citation Maturity Bias
+`publication_year` high SHAP importance confirmed as bias from target variable
+definition — cumulative citations disadvantage recent papers. Per-year analysis
+shows gradual performance degradation, not a cliff edge. Model remains useful
+for recent papers but predictions less reliable post-2021.
+
+---
+
+## Future Work
+- Redefine target using first-year citations — removes citation maturity bias,
+  `first_year_citations` already available in dataset
+- Temporal train/test split (2015-2021 train, 2022-2024 test) — more realistic
+  evaluation, best done alongside target redefinition
 - Venue quality features (CORE ranking, Scimago journal quartile)
 - Abstract text features
 - Author reputation features (h-index at time of publication)

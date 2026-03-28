@@ -134,17 +134,60 @@ high-impact papers.
 
 ---
 
-## Model 4 — Tuned GBC (Notebook 10, in progress)
+## Model 4 — Tuned GBC (Notebook 10) ✅ COMPLETE
 **Base model:** Top performing model from PyCaret `compare_models()` —
 GBC trimmed + missingness flags (34 features)
 **Tuning:** Bayesian hyperparameter search, n_iter=50, optimize='F1'
 **Search library:** scikit-optimize
-**Target:** Improve F1 above 0.54 while maintaining recall ≥ 0.60
+**Runtime:** ~5 hours
+**Saved:** `models/gbc_tuned.pkl`
 
-### Next Steps After Tuning
-1. Evaluate tuned GBC — plots + confusion matrix
-2. Threshold analysis — find optimal operating point
-3. Final comparison table across all models and runs
-4. Save final model
-5. SHAP analysis (Notebook 11)
-6. Streamlit dashboard (Week 2)
+### Tuning Results — CV
+
+| Metric | Pre-Tuning | Tuned |
+|---|---|---|
+| F1 | 0.5405 | 0.5523 |
+| AUC | 0.8406 | 0.8462 |
+| Recall | 0.5859 | 0.6084 |
+| Precision | 0.5016 | 0.4867 |
+
+### Final Model Comparison — All GBC Runs (Test Set)
+
+| Metric | First Model | Enriched | Trimmed+Flags | Tuned GBC |
+|---|---|---|---|---|
+| F1 | 0.5428 | 0.5257 | 0.5405 | 0.5519 |
+| AUC | 0.8413 | 0.8412 | 0.8406 | 0.8446 |
+| Recall | 0.5961 | 0.5195 | 0.5859 | 0.6442 |
+| Precision | 0.4982 | 0.5323 | 0.5016 | 0.4827 |
+| True Positives | 6,421 | 5,563 | 6,305 | 6,803 |
+| False Negatives | 4,139 | 4,997 | 4,255 | 3,757 |
+
+Tuned GBC is the best model across all runs — highest F1, AUC, recall
+and true positives. Catches 382 more high-impact papers than the first
+model and 498 more than trimmed+flags pre-tuning.
+
+### Model Selection Confirmed
+GBC selected as the final model based on:
+1. Best F1 and recall across all runs
+2. Feature importance consistent with statistical evidence —
+   `referenced_works_count` dominant across EDA, Mann-Whitney,
+   GBC importance and SHAP
+3. Best precision/recall balance for publisher and funder use cases
+4. Good generalisation — train/test gap ~0.02 across all metrics
+
+### Known Limitation — Citation Maturity Bias
+`publication_year` is the second most important feature but reflects
+bias in the target variable — cumulative citations disadvantage recent
+papers. Performance degrades gradually from F1 0.64 (2015-2016) to
+F1 0.49 (2024). Model remains useful for recent papers — catching 59%
+of high-impact 2024 papers at publication time.
+
+### Future Work
+- Redefine target using first-year citations — removes citation maturity
+  bias, `first_year_citations` already available in dataset
+- Temporal train/test split (2015-2021 train, 2022-2024 test) — more
+  realistic evaluation, best done alongside target redefinition
+- Venue quality features (CORE ranking, Scimago journal quartile)
+- Abstract text features
+- Author reputation features (h-index at time of publication)
+- Referenced works citation quality (blocked by 1.7M unique ID scale)
