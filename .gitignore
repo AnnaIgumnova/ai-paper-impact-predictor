@@ -23,6 +23,7 @@ Thumbs.db
 
 # Logs
 notebooks/logs.log
+logs.log
 
 # CatBoost
 notebooks/catboost_info/
@@ -32,3 +33,6 @@ notebooks/catboost_info/
 
 # Presentations
 presentation/
+
+# Charts
+charts/

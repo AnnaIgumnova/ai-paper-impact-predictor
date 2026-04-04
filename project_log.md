@@ -737,9 +737,128 @@ for recent papers but predictions less reliable post-2021.
 ## Future Work
 - Redefine target using first-year citations — removes citation maturity bias,
   `first_year_citations` already available in dataset
-- Temporal train/test split (2015-2021 train, 2022-2024 test) — more realistic
-  evaluation, best done alongside target redefinition
+
 - Venue quality features (CORE ranking, Scimago journal quartile)
 - Abstract text features
 - Author reputation features (h-index at time of publication)
 - Referenced works citation quality (blocked by 1.7M unique ID scale)
+
+
+
+## Streamlit App Development
+
+### Overview
+Built an interactive Streamlit dashboard as the final deliverable for the AI Paper Impact Predictor project. The app allows users to input paper metadata and receive a high-impact probability score with a SHAP-based explanation of which features drove the prediction.
+
+**Live app:** https://ai-paper-impact-predictor-wycyc96z8reeu3svfwc2ks.streamlit.app/
+
+---
+
+### Model Preparation for Deployment
+
+The final tuned GBC model was saved by PyCaret as a full pipeline (`gbc_tuned.pkl`), which included preprocessing steps (imputer, SMOTE, column cleaner) incompatible with plain pickle loading outside of PyCaret.
+
+**Solution:** Extracted the raw sklearn `GradientBoostingClassifier` from the pipeline using `named_steps['trained_model']` and re-saved with plain pickle:
+
+```python
+final_gbc = tuned_gbc.named_steps['trained_model']
+with open('../models/gbc_tuned_streamlit.pkl', 'wb') as f:
+    pickle.dump(final_gbc, f)
+```
+
+OHE encoding is handled manually in the app using the exact 34-column schema from `X_train_trimmed.csv`.
+
+**Deployment fix:** Streamlit Cloud defaulted to Python 3.14 causing sklearn version mismatch. Fixed by manually selecting **Python 3.10** in Streamlit Cloud app settings before deployment.
+
+---
+
+### App Structure
+
+**File:** `streamlit_app_final.py`  
+**Model:** `models/gbc_tuned_streamlit.pkl`  
+**SHAP background:** `data/features/X_train_trimmed.csv`
+
+**Layout:**
+- Left 3/4 — input form with 4 columns (Paper details, Publication, Collaboration, Impact signals)
+- Right 1/4 — prediction score, progress bar, interpretation message
+- Full width below — SHAP feature contributions chart
+- Sidebar — model performance metrics and framing
+
+---
+
+### Input Features (12 user-facing)
+
+| Column | Input type |
+|--------|-----------|
+| Years to accumulate citations | Number (0-9), converted to publication_year = 2024 - years |
+| Topic name | Dropdown (10 AI topics) |
+| Language | Dropdown (en, other) |
+| Publication type | Dropdown (5 options) |
+| Open access status | Dropdown (6 options) |
+| SDG: Quality Education | Checkbox |
+| Authors | Number |
+| Countries | Number |
+| Institutions | Number |
+| References | Number |
+| Funders | Number |
+| SDGs tagged | Number |
+
+**Auto-calculated (not user-facing):**
+- `references_missing` — 1 if references == 0
+- `countries_missing` — 1 if countries == 0
+- `institutions_missing` — 1 if institutions == 0
+
+---
+
+### Prediction Output
+
+- Model probability range: min 29%, max 69%, mean 40%
+- Dynamic colour coding based on score:
+  - ≥55% → green (strong signal) — top 10% of predictions
+  - 40-55% → blue (moderate signal) — above average
+  - <40% → amber (weak signal) — below average
+- Interpretation message aligned with model's actual probability distribution:
+  - Top 10% of predictions starts at ~55%
+  - Median prediction is ~36%
+  - Mean prediction is ~40%
+
+---
+
+### SHAP Feature Contributions
+
+- Library: `shap.TreeExplainer` with `X_train_trimmed.csv` as background
+- Percentages calculated from all 34 features before filtering
+- Display filter: numerical features always shown, OHE features only shown if selected by user (value = 1)
+- Top 10 features shown by absolute SHAP value
+- Chart shows share of total prediction influence (%)
+- Green bars = pushed prediction up, red bars = pushed prediction down
+
+---
+
+### Deployment
+
+**Platform:** Streamlit Cloud  
+**Repository:** github.com/annaigumnova/ai-paper-impact-predictor  
+**Branch:** main  
+**Main file:** `streamlit_app_final.py`  
+**Python version:** 3.10 (selected manually in Streamlit Cloud settings)
+
+**`requirements.txt`:**
+streamlit
+pandas
+numpy
+scikit-learn==1.4.2
+shap
+plotly
+
+
+---
+
+### Key Design Decisions
+
+- No threshold slider — fixed interpretation thresholds based on actual model probability distribution
+- `publication_year` replaced with "Years to accumulate citations" (0-9) — converted behind the scenes to `2024 - years` to remove citation maturity bias framing
+- SHAP chart filtered to show only features relevant to the user's specific input
+- Model performance shown in sidebar with plain English explanations
+- App framed as a screening tool, not a decision maker
+```
