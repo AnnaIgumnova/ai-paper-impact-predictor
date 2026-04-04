@@ -87,7 +87,8 @@ with col_form:
         with col1:
             st.markdown("**Paper details**")
             topic_name = st.selectbox("Topic Name", options=["Anomaly Detection Techniques and Applications", "Evolutionary Algorithms and Applications", "Metaheuristic Optimization Algorithms Research", "Natural Language Processing Techniques", "Neural Networks and Applications", "Privacy-Preserving Technologies in Data", "Quantum Computing Algorithms and Architecture", "Sentiment Analysis and Opinion Mining", "Speech Recognition and Synthesis", "Topic Modeling"])
-            publication_year = st.number_input("Publication Year", min_value=2000, max_value=2030, value=2023)
+            # User inputs years_since in the form instead of publication_year — we convert to publication_year before sending to model
+            years_since = st.number_input("Years since publication", min_value=0, max_value=9, value=3, step=1)
             language = st.selectbox("Language", options=["en", "other"])
             
         
@@ -129,6 +130,9 @@ with col_result:
         references_missing = 1 if referenced_works_count == 0 else 0
         countries_missing = 1 if countries_distinct_count == 0 else 0
         institutions_missing = 1 if unique_institutions_count == 0 else 0
+
+        # Convert years_since to publication_year BEFORE building input_data
+        publication_year = 2024 - years_since
 
         # Build a single-row DataFrame in the exact column order the model was trained on
         input_data = pd.DataFrame([{
@@ -226,7 +230,7 @@ if submitted:
     
     # Clean labels for SHAP chart
         feature_labels = {
-            'publication_year': 'Publication Year',
+            'publication_year': 'Years since publication',
             'referenced_works_count': 'Number of References',
             'unique_authors_count': 'Number of Authors',
             'countries_distinct_count': 'Number of Countries',
