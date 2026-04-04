@@ -214,9 +214,6 @@ with col_result:
 # Adding SHAP analysis for the features
 
 if submitted:
-    with st.container(border=True):
-        st.subheader("Top 10 Feature Contributions")
-        st.markdown("Impact rate shows each feature's share of total prediction influence.")
 
         X_train = pd.read_csv("data/features/X_train_trimmed.csv")
 
@@ -265,29 +262,39 @@ if submitted:
             'language_other': 'Language:<br>Other',
         }
 
-    # Build SHAP DataFrame with all 34 features
+        # Build SHAP DataFrame with all 34 features
         shap_df = pd.DataFrame({
             'feature': X_train.columns.tolist(),
             'shap_value': shap_values.values[0]
         })
 
-        # Calculate abs from ALL 34 features first
+        # Calculate abs and percentages from ALL 34 features first
         shap_df['abs_shap'] = shap_df['shap_value'].abs()
 
-        # Keep only features where user input is non-zero
-        shap_df = shap_df[input_data.iloc[0].values != 0]
+        # Save total before any filtering — used to calculate top 10 coverage
+        total_abs_shap = shap_df['abs_shap'].sum()
 
-        # Calculate percentages from remaining features
-        shap_df['shap_pct'] = (shap_df['abs_shap'] / shap_df['abs_shap'].sum()) * 100
+        shap_df['shap_pct'] = (shap_df['abs_shap'] / total_abs_shap) * 100
 
         # Apply direction to percentage
         shap_df['shap_pct'] = shap_df.apply(
             lambda row: row['shap_pct'] if row['shap_value'] > 0 else -row['shap_pct'], axis=1
         )
 
+        # Filter — keep numerical always, keep OHE only if selected
+        numerical_cols = ['publication_year', 'referenced_works_count', 'unique_authors_count',
+                          'countries_distinct_count', 'unique_institutions_count',
+                          'funder_count', 'sdg_count', 'sdg_4']
+
+        mask = (input_data.iloc[0].values != 0) | (shap_df['feature'].isin(numerical_cols))
+        shap_df = shap_df[mask.values]
+
         # Filter top 10 by absolute value
         shap_df = shap_df.sort_values('abs_shap', ascending=False).head(10)
         shap_df = shap_df.sort_values('shap_pct', ascending=True)
+
+        # Calculate what percentage of total influence top 10 covers
+        top10_pct = round(shap_df['abs_shap'].sum() / total_abs_shap * 100, 1)
 
         # Reset index after all transformations
         shap_df = shap_df.reset_index(drop=True)
@@ -295,7 +302,7 @@ if submitted:
         # Apply clean labels
         shap_df['feature'] = shap_df['feature'].map(feature_labels)
 
-        # Colour — teal for positive, coral for negative
+        # Colour — green for positive, red for negative
         shap_df['color'] = shap_df['shap_value'].apply(lambda x: 'positive' if x > 0 else 'negative')
 
         shap_df['text_label'] = shap_df['shap_pct'].abs().round(1).astype(str) + '%'
@@ -315,7 +322,6 @@ if submitted:
             textposition='outside',
             textfont=dict(color='black')
         )
-
         fig.update_layout(
             showlegend=False,
             plot_bgcolor='white',
@@ -326,4 +332,8 @@ if submitted:
             margin=dict(l=20, r=20, t=40, b=100),
             bargap=0.3
         )
-        st.plotly_chart(fig, width='stretch')
+        # Display chart in bordered container
+        with st.container(border=True):
+            st.subheader("Top 10 Feature Contributions")
+            st.markdown(f"Impact rate covers <span style='font-size: 1.2rem; color: #4C9BE8; font-weight: bold;'>{top10_pct}%</span> of total prediction influence.", unsafe_allow_html=True)
+            st.plotly_chart(fig, width='stretch')
