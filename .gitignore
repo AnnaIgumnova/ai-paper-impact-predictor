@@ -10,7 +10,6 @@ __pycache__/
 # Models — ignore all except streamlit model
 models/*
 !models/gbc_tuned_streamlit.pkl
-!models/gbc_tuned_streamlit_deployment.pkl
 
 # Credentials
 .env
