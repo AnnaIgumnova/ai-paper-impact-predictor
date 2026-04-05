@@ -31,8 +31,6 @@ notebooks/catboost_info/
 # Excel files
 *.xlsx
 
-# Presentations
-presentation/
 
 # Charts
 charts/
